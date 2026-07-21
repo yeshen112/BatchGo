@@ -69,12 +69,12 @@ def launch_app(entry: AppEntry) -> bool:
         # 工作目录
         cwd = working_dir if working_dir and os.path.isdir(working_dir) else None
 
-        # Windows 独立进程启动
+        # Windows 独立进程启动（不弹出命令行窗口）
         if sys.platform == "win32":
             subprocess.Popen(
                 cmd,
                 cwd=cwd,
-                creationflags=subprocess.CREATE_NEW_CONSOLE if not is_browser(path) else 0,
+                creationflags=subprocess.DETACHED_PROCESS,
                 close_fds=True,
             )
         else:

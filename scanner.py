@@ -1,6 +1,6 @@
 """
 应用扫描模块 —— 遍历 Start Menu 目录解析 .lnk 快捷方式，
-生成已安装应用列表。
+生成已安装应用列表，自动区分"常用应用"和"系统工具"。
 """
 import os
 import sys
@@ -25,6 +25,7 @@ class AppInfo:
     arguments: str = ""                    # 快捷方式自带参数
     working_dir: str = ""                  # 工作目录
     description: str = ""                  # 描述（.lnk 文件所在子目录名，如 "办公"）
+    is_system_tool: bool = False           # 是否为系统工具（非日常应用）
 
     def to_dict(self) -> dict:
         return {
@@ -33,6 +34,7 @@ class AppInfo:
             "arguments": self.arguments,
             "working_dir": self.working_dir,
             "description": self.description,
+            "is_system_tool": self.is_system_tool,
         }
 
     @classmethod
@@ -43,6 +45,7 @@ class AppInfo:
             arguments=d.get("arguments", ""),
             working_dir=d.get("working_dir", ""),
             description=d.get("description", ""),
+            is_system_tool=d.get("is_system_tool", False),
         )
 
 
@@ -61,6 +64,134 @@ _EXCLUDE_PATTERNS = [
     ".chm", ".hlp", ".pdf", ".html", ".htm", ".url",  # 非可执行文件
 ]
 
+# ── 系统工具判定 ───────────────────────────────────────────────────
+
+# 已知系统工具名（小写）
+_SYSTEM_TOOL_NAMES = {
+    "about windows", "add features to windows",
+    "administrative tools", "application verifier",
+    "azure",
+    "backup and restore", "bitlocker",
+    "calculator", "calendar", "certificate", "character map",
+    "cleanmgr", "command prompt", "cmd", "component services",
+    "computer management", "connect to a network",
+    "control panel", "credential manager", "cttune",
+    "database",
+    "default apps", "default programs", "device manager",
+    "device pair", "disk cleanup", "disk defragmenter",
+    "disk management", "display", "dpapi", "dxdiag",
+    "ease of access",
+    "event viewer", "excel",
+    "file explorer", "file history",
+    "fonts", "free up disk space",
+    "getting started",
+    "help", "hyper-v",
+    "iis", "indexing options", "internet explorer",
+    "iscsi", "isoburn",
+    "journal",
+    "keyboard",
+    "language options",
+    "magnify", "mail", "malicious software removal",
+    "map network",
+    "math input panel", "memory diagnostic", "microsoft edge",
+    "migautoplay", "mip", "mobsync", "mouse",
+    "mrt", "ms access", "ms excel", "ms powerpoint", "ms word",
+    "mstsc",
+    "narrator", "network", "notepad", "notification",
+    "odbc", "office", "onedrive", "onedrive",
+    "onenote", "osk",
+    "outlook", "outlook",
+    "paint", "performance monitor",
+    "phone", "power options", "powershell", "powerpoint",
+    "presentation", "print", "print management",
+    "private character editor",
+    "problem steps",
+    "programs and features",
+    "project",
+    "publisher",
+    "recovery",
+    "region", "registry editor", "regedit",
+    "remote desktop",
+    "resource monitor",
+    "run",
+    "services",
+    "snipping", "snip & sketch",
+    "sound", "speech", "steps recorder",
+    "sticky notes",
+    "storage", "subscription activation",
+    "sync center",
+    "system configuration", "system information",
+    "system monitor", "system settings",
+    "tablet", "task manager",
+    "task scheduler",
+    "taskbar",
+    "telnet",
+    "terminal",
+    "tpm",
+    "troubleshoot",
+    "user accounts",
+    "view local services",
+    "virus",
+    "visio",
+    "volume mixer",
+    "windows",
+    "wordpad",
+    "xbox", "xps",
+    "zip", "7-zip",
+}
+
+# 系统目录关键词
+_SYSTEM_DIR_KEYWORDS = [
+    "system32", "syswow64",
+    "\\windows\\",
+    "c:\\windows\\",
+]
+
+
+def _is_system_tool(name: str, target_path: str) -> bool:
+    """
+    判定是否为系统工具。
+    返回 True 表示该应用是系统工具而非日常应用。
+    """
+    lower_name = name.lower()
+    lower_path = target_path.lower()
+
+    # 1. 路径在 Windows 系统目录下
+    if lower_path.startswith("c:\\windows\\system32"):
+        return True
+    if lower_path.startswith("c:\\windows\\syswow64"):
+        return True
+    if "\\windows\\system32\\" in lower_path:
+        return True
+
+    # 2. 名称匹配已知系统工具列表
+    # 完全匹配
+    if lower_name in _SYSTEM_TOOL_NAMES:
+        return True
+    # 部分匹配（名称较短时检查是否包含系统工具关键词）
+    name_words = set(lower_name.split())
+    for sys_name in _SYSTEM_TOOL_NAMES:
+        if len(sys_name) > 5 and sys_name in lower_name:
+            return True
+
+    # 3. 目标路径包含常见的系统工具目录
+    for kw in _SYSTEM_DIR_KEYWORDS:
+        if kw in lower_path:
+            return True
+
+    return False
+
+
+# ── 文件存在性检查缓存 ─────────────────────────────────────────────
+_isfile_cache: dict[str, bool] = {}
+
+
+def _cached_isfile(path: str) -> bool:
+    """带缓存的 os.path.isfile，加速大量重复检查"""
+    if path not in _isfile_cache:
+        _isfile_cache[path] = os.path.isfile(path)
+    return _isfile_cache[path]
+
 
 def _is_valid_app(name: str, target: str) -> bool:
     """过滤掉卸载程序、帮助文档等非应用条目"""
@@ -76,7 +207,7 @@ def _is_valid_app(name: str, target: str) -> bool:
         return False
 
     # 目标文件必须存在
-    if not os.path.isfile(target):
+    if not _cached_isfile(target):
         return False
 
     return True
@@ -106,7 +237,6 @@ def _resolve_target(path: str) -> Optional[str]:
     """
     if not path:
         return None
-    # 展开环境变量
     expanded = os.path.expandvars(path)
     expanded = os.path.expanduser(expanded)
     return expanded
@@ -126,22 +256,24 @@ def scan_apps(progress_callback=None) -> list[AppInfo]:
         print("[Scanner] pywin32 未安装，无法解析 .lnk 文件。请执行: pip install pywin32")
         return []
 
+    # 清空文件缓存
+    _isfile_cache.clear()
+
     # 初始化 COM（线程安全处理）
     _com_initialized = False
     try:
         pythoncom.CoInitialize()
         _com_initialized = True
     except Exception:
-        # COM 可能已被其他方式初始化，继续尝试
         pass
 
     try:
         shell = win32com.client.Dispatch("WScript.Shell")
         start_menu_dirs = _get_start_menu_dirs()
-        apps: dict[str, AppInfo] = {}  # key = (name.lower(), target.lower()) 用于去重
+        apps: dict[str, AppInfo] = {}
 
         # 先收集所有 .lnk 文件
-        all_lnk_files: list[tuple[str, str]] = []  # (lnk_path, category)
+        all_lnk_files: list[tuple[str, str]] = []
         for sm_dir in start_menu_dirs:
             for root, dirs, files in os.walk(sm_dir):
                 category = os.path.relpath(root, sm_dir)
@@ -164,13 +296,11 @@ def scan_apps(progress_callback=None) -> list[AppInfo]:
                 if not target:
                     continue
 
-                # 应用名 = .lnk 文件名（去掉扩展名）
                 name = os.path.splitext(os.path.basename(lnk_path))[0]
 
                 if not _is_valid_app(name, target):
                     continue
 
-                # 去重 key
                 dedup_key = (name.lower(), target.lower())
 
                 if dedup_key not in apps:
@@ -180,24 +310,26 @@ def scan_apps(progress_callback=None) -> list[AppInfo]:
                         arguments=shortcut.Arguments or "",
                         working_dir=shortcut.WorkingDirectory or "",
                         description=category,
+                        is_system_tool=_is_system_tool(name, target),
                     )
             except Exception:
-                # 个别 .lnk 解析失败不影响整体
                 continue
             finally:
-                # 释放 COM 对象避免泄漏
                 if shortcut is not None:
                     try:
                         del shortcut
                     except Exception:
                         pass
 
-        # 按名称排序
-        result = sorted(apps.values(), key=lambda a: a.name.lower())
-        return result
+        # 排序：常用应用在前，系统工具在后，各自按名称排序
+        common = [a for a in apps.values() if not a.is_system_tool]
+        system = [a for a in apps.values() if a.is_system_tool]
+        common.sort(key=lambda a: a.name.lower())
+        system.sort(key=lambda a: a.name.lower())
+
+        return common + system
 
     finally:
-        # 释放 shell
         try:
             del shell
         except Exception:
@@ -207,10 +339,7 @@ def scan_apps(progress_callback=None) -> list[AppInfo]:
 
 
 def scan_and_cache(config_path: str, progress_callback=None) -> list[AppInfo]:
-    """
-    扫描应用并缓存到配置文件。
-    如果配置文件已有缓存，直接读取；否则扫描后写入。
-    """
+    """扫描应用并缓存到配置文件"""
     apps = scan_apps(progress_callback)
     if apps:
         _update_cache(config_path, apps)
