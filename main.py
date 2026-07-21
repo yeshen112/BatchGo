@@ -25,8 +25,13 @@ from launcher import launch_group
 # ── 日志 ──────────────────────────────────────────────────────────
 
 def _setup_logging():
-    """配置日志：输出到 %APPDATA%/BatchGo/batchgo.log"""
-    log_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "BatchGo")
+    """配置日志：开发→项目目录，打包→%APPDATA%/BatchGo"""
+    if getattr(sys, 'frozen', False):
+        # 打包后：用户数据目录
+        log_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "BatchGo")
+    else:
+        # 开发中：项目目录
+        log_dir = os.path.dirname(os.path.abspath(__file__))
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(log_dir, "batchgo.log")
 
@@ -441,7 +446,10 @@ class BatchGoApp:
 
 
 def _get_log_path() -> str:
-    log_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "BatchGo")
+    if getattr(sys, 'frozen', False):
+        log_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "BatchGo")
+    else:
+        log_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(log_dir, "batchgo.log")
 
 
