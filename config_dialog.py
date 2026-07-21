@@ -64,19 +64,29 @@ class ConfigDialog(QDialog):
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(8)
-        main_layout.setContentsMargins(12, 12, 12, 8)
+        main_layout.setSpacing(6)
+        main_layout.setContentsMargins(10, 10, 10, 6)
 
-        # ── 上半部分：分组管理 + 分组应用列表 ───────────────────
+        # ── 可拖拽的主分割器（上下） ────────────────────────────
+        main_splitter = QSplitter(Qt.Vertical)
+        main_splitter.setHandleWidth(5)
+
+        # ── 上半部分：分组 + 条目（左右可拖拽） ────────────────
         top_splitter = QSplitter(Qt.Horizontal)
+        top_splitter.setHandleWidth(5)
         top_splitter.addWidget(self._build_group_panel())
         top_splitter.addWidget(self._build_entries_panel())
         top_splitter.setSizes([220, 600])
-        main_layout.addWidget(top_splitter, stretch=3)
 
-        # ── 下半部分：可用应用列表（Tab 切换常用/系统工具）─────
-        bottom_panel = self._build_available_apps_panel()
-        main_layout.addWidget(bottom_panel, stretch=2)
+        main_splitter.addWidget(top_splitter)
+
+        # ── 下半部分：可用应用列表 ─────────────────────────────
+        main_splitter.addWidget(self._build_available_apps_panel())
+        main_splitter.setSizes([350, 200])
+        main_splitter.setStretchFactor(0, 3)
+        main_splitter.setStretchFactor(1, 2)
+
+        main_layout.addWidget(main_splitter, stretch=1)
 
         # ── 状态栏 ──────────────────────────────────────────────
         self.status_bar = QStatusBar()
