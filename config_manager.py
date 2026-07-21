@@ -14,11 +14,12 @@ from scanner import AppInfo
 @dataclass
 class AppEntry:
     """分组中的一个应用条目"""
-    name: str = ""              # 应用名称（冗余字段，方便直接加载）
-    path: str = ""              # 可执行文件路径
+    name: str = ""              # 应用名称
+    path: str = ""              # .exe 路径 或 UWP AUMID
     arguments: str = ""         # 额外启动参数
     working_dir: str = ""       # 工作目录
     url: str = ""               # 浏览器打开时附加的网址
+    is_uwp: bool = False        # 是否为 UWP / 微软商店应用
 
     def to_dict(self) -> dict:
         return {
@@ -27,6 +28,7 @@ class AppEntry:
             "arguments": self.arguments,
             "working_dir": self.working_dir,
             "url": self.url,
+            "is_uwp": self.is_uwp,
         }
 
     @classmethod
@@ -37,6 +39,7 @@ class AppEntry:
             arguments=d.get("arguments", ""),
             working_dir=d.get("working_dir", ""),
             url=d.get("url", ""),
+            is_uwp=d.get("is_uwp", False),
         )
 
     @classmethod
@@ -48,6 +51,7 @@ class AppEntry:
             arguments=info.arguments,
             working_dir=info.working_dir,
             url=url,
+            is_uwp=info.is_uwp,
         )
 
 
