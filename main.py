@@ -239,6 +239,11 @@ class BatchGoApp:
             action_empty = QAction("（暂无组合，请右键配置）", menu)
             action_empty.setEnabled(False)
             menu.addAction(action_empty)
+            # 添加一个快捷入口
+            menu.addSeparator()
+            action_cfg = QAction("⚙ 打开配置面板...", menu)
+            action_cfg.triggered.connect(self._open_config)
+            menu.addAction(action_cfg)
         else:
             for group in groups:
                 count = len(group.entries)
@@ -249,21 +254,33 @@ class BatchGoApp:
                 )
                 menu.addAction(action)
 
+            menu.addSeparator()
+            action_cfg = QAction("⚙ 配置面板...", menu)
+            action_cfg.triggered.connect(self._open_config)
+            menu.addAction(action_cfg)
+
         return menu
 
     # ── 托盘事件 ──────────────────────────────────────────────
 
     def _on_tray_activated(self, reason):
         """托盘图标被点击"""
-        if reason == QSystemTrayIcon.Trigger:  # 左键
+        if reason == QSystemTrayIcon.Trigger:       # 左键
             self._show_groups_menu()
-        elif reason == QSystemTrayIcon.Context:  # 右键（备用，contextMenu 已处理）
-            pass
+        elif reason == QSystemTrayIcon.DoubleClick: # 双击（Win11 兼容）
+            self._show_groups_menu()
+        elif reason == QSystemTrayIcon.MiddleClick: # 中键也支持
+            self._show_groups_menu()
 
     def _show_groups_menu(self):
-        """在鼠标位置显示分组选择菜单"""
-        menu = self._build_groups_menu()
-        menu.popup(QCursor.pos())
+        """在鼠标位置显示分组选择菜单（保持引用防止被 GC）"""
+        self._groups_menu = self._build_groups_menu()
+        self._groups_menu.aboutToHide.connect(self._on_groups_menu_closed)
+        self._groups_menu.popup(QCursor.pos())
+
+    def _on_groups_menu_closed(self):
+        """菜单关闭后清理引用"""
+        self._groups_menu = None
 
     # ── 操作 ──────────────────────────────────────────────────
 
