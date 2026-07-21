@@ -327,18 +327,18 @@ class BatchGoApp:
             self._show_groups_menu()
 
     def _show_groups_menu(self):
-        """在鼠标位置显示分组选择菜单"""
+        """在鼠标位置显示分组选择菜单（同步 exec，避免 GC 导致的 segfault）"""
         _log.debug("Showing groups menu")
         try:
-            self._groups_menu = self._build_groups_menu()
-            self._groups_menu.aboutToHide.connect(self._on_groups_menu_closed)
-            self._groups_menu.popup(QCursor.pos())
+            menu = self._build_groups_menu()
+            self._groups_menu = menu  # 保持引用
+            # 用 exec() 替代 popup()：同步执行，阻塞直到用户选择或取消
+            # 彻底避免 popup() 异步模式下 Qt 事件处理时的 C++ 层崩溃
+            menu.exec(QCursor.pos())
         except Exception:
             _log.error(f"Show groups menu failed:\n{traceback.format_exc()}")
-
-    def _on_groups_menu_closed(self):
-        """菜单关闭后清理引用"""
-        self._groups_menu = None
+        finally:
+            self._groups_menu = None
 
     # ── 操作 ──────────────────────────────────────────────────
 
