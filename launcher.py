@@ -1,6 +1,7 @@
 """
 启动引擎 —— 按分组批量启动应用程序。
 支持浏览器 + URL、独立窗口启动。
+子进程完全脱离父进程，关闭终端不影响已启动的应用。
 """
 import os
 import sys
@@ -30,11 +31,11 @@ def is_browser(path: str) -> bool:
 
 def launch_app(entry: AppEntry) -> bool:
     """
-    启动单个应用。
+    启动单个应用。子进程完全脱离父进程。
 
     规则：
     - 如果 path 为空但 url 不为空 → 用默认浏览器打开 URL
-    - 如果 path 为浏览器且 url 不为空 → 启动浏览器并打开 URL
+    - 如果 path 是浏览器且有 url → 启动浏览器并打开 URL
     - 否则 → 直接启动应用
 
     Returns:
@@ -46,50 +47,50 @@ def launch_app(entry: AppEntry) -> bool:
     working_dir = entry.working_dir if entry.working_dir else None
 
     try:
-        # 情况 1：仅有 URL，无应用路径
+        # 情况 1：仅有 URL，无应用路径 → 默认浏览器打开
         if not path and url:
             webbrowser.open(url)
             return True
 
-        # 情况 2：无有效路径
         if not path:
             return False
 
-        # 构建命令行参数
+        # 构建完整命令行
         cmd = [path]
-
-        # URL 作为参数
         if url:
             cmd.append(url)
-
-        # 额外的启动参数（简单按空格分割）
         if args_str:
             cmd.extend(args_str.split())
 
-        # 工作目录
         cwd = working_dir if working_dir and os.path.isdir(working_dir) else None
 
-        # Windows 独立进程启动（不弹出命令行窗口）
         if sys.platform == "win32":
+            # Windows：完全独立进程，脱离父进程组，不继承终端
             subprocess.Popen(
                 cmd,
                 cwd=cwd,
-                creationflags=subprocess.DETACHED_PROCESS,
-                close_fds=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                creationflags=(
+                    subprocess.CREATE_NEW_PROCESS_GROUP  # 独立进程组，父进程关了不影响
+                    | subprocess.DETACHED_PROCESS         # 不继承控制台
+                ),
             )
         else:
             subprocess.Popen(
                 cmd,
                 cwd=cwd,
-                start_new_session=True,
+                start_new_session=True,           # 独立 session
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
             )
 
         return True
 
     except FileNotFoundError:
-        # 文件不存在，尝试用 os.startfile（仅 Windows）
+        # Popen 抛 FileNotFound → 尝试 os.startfile（Windows 原生启动）
         if sys.platform == "win32" and os.path.exists(path):
             try:
                 os.startfile(path)
