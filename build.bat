@@ -25,6 +25,7 @@ pyinstaller --onefile --windowed --name BatchGo ^
     --add-data "config_manager.py;." ^
     --add-data "config_dialog.py;." ^
     --add-data "launcher.py;." ^
+    --add-data "icon_utils.py;." ^
     --hidden-import win32com ^
     --hidden-import win32com.client ^
     --hidden-import pythoncom ^

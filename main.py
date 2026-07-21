@@ -4,7 +4,6 @@ BatchGo — 批量应用启动工具
 """
 import os
 import sys
-import json
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -21,7 +20,7 @@ from PySide6.QtGui import (
     QAction,
     QCursor,
 )
-from PySide6.QtCore import Qt, QSharedMemory, QTimer
+from PySide6.QtCore import Qt, QSharedMemory, QTimer, QThread, Signal
 
 from scanner import scan_and_cache, load_cached_apps
 from config_manager import ConfigManager, AppGroup
@@ -32,6 +31,21 @@ from launcher import launch_group
 
 APP_NAME = "BatchGo"
 APP_VERSION = "1.0.0"
+
+
+# ── 后台扫描线程 ──────────────────────────────────────────────────
+
+class ScanThread(QThread):
+    """后台扫描，不阻塞托盘 UI"""
+    finished = Signal(list)
+
+    def __init__(self, config_path: str):
+        super().__init__()
+        self.config_path = config_path
+
+    def run(self):
+        apps = scan_and_cache(self.config_path)
+        self.finished.emit(apps)
 
 
 # ── 图标生成 ──────────────────────────────────────────────────────
@@ -69,15 +83,6 @@ def get_startup_vbs_path() -> str:
         "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
     )
     return os.path.join(startup_dir, "BatchGo.vbs")
-
-
-def get_target_exe_path() -> str:
-    """获取目标可执行文件路径（开发时是 python，打包后是 exe）"""
-    if getattr(sys, 'frozen', False):
-        return sys.executable
-    else:
-        # 开发环境：创建启动 python main.py 的 vbs
-        return sys.executable
 
 
 def enable_auto_start():
@@ -163,15 +168,20 @@ class BatchGoApp:
     # ── 首次扫描 ──────────────────────────────────────────────
 
     def _first_scan(self):
-        """首次启动时自动扫描应用"""
+        """首次启动时后台扫描应用"""
         self.tray.showMessage(
             APP_NAME,
             "正在扫描已安装应用，请稍候...",
             QSystemTrayIcon.Information,
             2000,
         )
-        apps = scan_and_cache(self.config.config_path)
-        self.config.load()  # 重新加载
+        self._scan_thread = ScanThread(self.config.config_path)
+        self._scan_thread.finished.connect(self._on_first_scan_finished)
+        self._scan_thread.start()
+
+    def _on_first_scan_finished(self, apps):
+        """首次扫描完成"""
+        self.config.load()
         self.tray.showMessage(
             APP_NAME,
             f"扫描完成！发现 {len(apps)} 个应用",
@@ -285,18 +295,25 @@ class BatchGoApp:
             self._rebuild_context_menu()
 
     def _refresh_apps(self):
-        """手动刷新应用列表"""
+        """手动刷新应用列表（后台扫描，不阻塞托盘）"""
         self.tray.showMessage(
             APP_NAME,
-            "正在扫描应用...",
+            "正在后台扫描应用...",
             QSystemTrayIcon.Information,
             2000,
         )
-        apps = scan_and_cache(self.config.config_path)
+        self._scan_thread = ScanThread(self.config.config_path)
+        self._scan_thread.finished.connect(self._on_refresh_finished)
+        self._scan_thread.start()
+
+    def _on_refresh_finished(self, apps):
+        """扫描完成回调"""
         self.config.load()
+        common = sum(1 for a in apps if not a.is_system_tool)
+        sys_tools = sum(1 for a in apps if a.is_system_tool)
         self.tray.showMessage(
             APP_NAME,
-            f"刷新完成！发现 {len(apps)} 个应用",
+            f"刷新完成！{len(apps)} 个应用（常用 {common}，系统工具 {sys_tools}）",
             QSystemTrayIcon.Information,
             3000,
         )
