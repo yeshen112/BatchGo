@@ -235,11 +235,27 @@ class ConfigDialog(QDialog):
     # ── 分组列表操作 ──────────────────────────────────────────
 
     def _refresh_group_list(self):
+        # 记住当前选中的分组，刷新后恢复
+        current = self.group_list.currentItem()
+        saved_name = current.data(Qt.UserRole) if current else self._current_group_name
+
+        self.group_list.blockSignals(True)
         self.group_list.clear()
+
         for g in self.config.get_groups():
             item = QListWidgetItem(f"📁 {g.name}  ({len(g.entries)})")
             item.setData(Qt.UserRole, g.name)
             self.group_list.addItem(item)
+
+        self.group_list.blockSignals(False)
+
+        # 恢复之前选中的分组
+        if saved_name:
+            for i in range(self.group_list.count()):
+                item = self.group_list.item(i)
+                if item.data(Qt.UserRole) == saved_name:
+                    self.group_list.setCurrentItem(item)
+                    break
 
     def _on_group_selected(self, current, previous):
         if current is None:
