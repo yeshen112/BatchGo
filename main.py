@@ -135,40 +135,80 @@ def create_tray_icon() -> QIcon:
 
 # ── 开机自启管理 ──────────────────────────────────────────────────
 
-def get_startup_vbs_path() -> str:
-    startup_dir = os.path.join(
-        os.environ.get("APPDATA", ""),
-        "Microsoft", "Windows", "Start Menu", "Programs", "Startup"
-    )
-    return os.path.join(startup_dir, "BatchGo.vbs")
-
-
 def enable_auto_start():
-    vbs_path = get_startup_vbs_path()
-    os.makedirs(os.path.dirname(vbs_path), exist_ok=True)
+    """通过注册表 Run 键启用开机自启（比 VBS 可靠，无路径编码问题）"""
+    import winreg
     if getattr(sys, 'frozen', False):
-        vbs_content = f'CreateObject("WScript.Shell").Run """{sys.executable}""", 0, False'
+        cmd = sys.executable
     else:
         pythonw = sys.executable.replace("python.exe", "pythonw.exe")
         main_py = os.path.join(os.path.dirname(os.path.abspath(__file__)), "main.py")
-        vbs_content = f'CreateObject("WScript.Shell").Run """{pythonw}"" ""{main_py}""", 0, False'
-    with open(vbs_path, "w", encoding="utf-8") as f:
-        f.write(vbs_content)
-    _log.info("Auto-start enabled")
+        cmd = f'"{pythonw}" "{main_py}"'
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0, winreg.KEY_SET_VALUE,
+        )
+        winreg.SetValueEx(key, "BatchGo", 0, winreg.REG_SZ, cmd)
+        winreg.CloseKey(key)
+        _log.info("Auto-start enabled")
+        # 清理旧的 VBS 遗留
+        _cleanup_old_vbs()
+    except Exception:
+        _log.error(f"Failed to set auto-start: {traceback.format_exc()}")
 
 
 def disable_auto_start():
-    vbs_path = get_startup_vbs_path()
-    if os.path.exists(vbs_path):
-        try:
-            os.remove(vbs_path)
-        except OSError:
-            pass
-    _log.info("Auto-start disabled")
+    """从注册表 Run 键移除开机自启"""
+    import winreg
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0, winreg.KEY_SET_VALUE,
+        )
+        winreg.DeleteValue(key, "BatchGo")
+        winreg.CloseKey(key)
+        _log.info("Auto-start disabled")
+    except FileNotFoundError:
+        pass
+    except Exception:
+        _log.error(f"Failed to disable auto-start: {traceback.format_exc()}")
+    _cleanup_old_vbs()
 
 
 def is_auto_start_enabled() -> bool:
-    return os.path.exists(get_startup_vbs_path())
+    """检查注册表 Run 键中是否存在 BatchGo"""
+    import winreg
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0, winreg.KEY_READ,
+        )
+        winreg.QueryValueEx(key, "BatchGo")
+        winreg.CloseKey(key)
+        return True
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return False
+
+
+def _cleanup_old_vbs():
+    """删除旧版 VBS 自启文件（迁移到注册表后清理遗留）"""
+    vbs_path = os.path.join(
+        os.environ.get("APPDATA", ""),
+        "Microsoft", "Windows", "Start Menu", "Programs", "Startup",
+        "BatchGo.vbs",
+    )
+    if os.path.exists(vbs_path):
+        try:
+            os.remove(vbs_path)
+            _log.info("Cleaned up old VBS file")
+        except OSError:
+            pass
 
 
 # ── 单实例控制 ────────────────────────────────────────────────────
