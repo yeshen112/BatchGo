@@ -7,8 +7,13 @@ import os
 import sys
 import subprocess
 import webbrowser
+import traceback
 
 from config_manager import AppGroup, AppEntry
+
+# 模块级 logger
+import logging
+_log = logging.getLogger("BatchGo")
 
 
 # ── 已知浏览器可执行文件名（小写） ────────────────────────────────
@@ -100,6 +105,7 @@ def launch_app(entry: AppEntry) -> bool:
         return True
 
     except FileNotFoundError:
+        _log.warning(f"File not found: {path}\n{traceback.format_exc()}")
         if sys.platform == "win32" and path and os.path.exists(path):
             try:
                 os.startfile(path)
@@ -110,6 +116,16 @@ def launch_app(entry: AppEntry) -> bool:
                 pass
         return False
     except Exception:
+        _log.error(f"Launch failed [{entry.name} / {path}]:\n{traceback.format_exc()}")
+        # 兜底：用 os.startfile 尝试绕过权限等问题
+        if sys.platform == "win32" and path and os.path.exists(path):
+            try:
+                os.startfile(path)
+                if url:
+                    webbrowser.open(url)
+                return True
+            except Exception:
+                pass
         return False
 
 
