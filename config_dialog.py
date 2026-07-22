@@ -65,6 +65,10 @@ class ConfigDialog(QDialog):
         self.hotkey_edit.setKeySequence(self.config.get_hotkey())
         self.hotkey_edit.editingFinished.connect(self._on_hotkey_changed)
 
+    def closeEvent(self, event):
+        """右上角 X 按钮行为与「关闭」按钮一致"""
+        self.accept()
+
     # ── UI 构建 ───────────────────────────────────────────────
 
     def _build_ui(self):
