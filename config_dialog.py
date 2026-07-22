@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QInputDialog, QAbstractItemView,
     QProgressBar, QStatusBar, QWidget,
     QFileDialog, QFormLayout, QDialogButtonBox,
+    QKeySequenceEdit,
 )
 from PySide6.QtCore import Qt, QSize, QThread, Signal
 from PySide6.QtGui import QIcon
@@ -60,6 +61,9 @@ class ConfigDialog(QDialog):
         self._load_apps()
         self._refresh_group_list()
         self._refresh_available_apps()
+        # 初始化热键显示，并连接保存信号
+        self.hotkey_edit.setKeySequence(self.config.get_hotkey())
+        self.hotkey_edit.editingFinished.connect(self._on_hotkey_changed)
 
     # ── UI 构建 ───────────────────────────────────────────────
 
@@ -93,6 +97,16 @@ class ConfigDialog(QDialog):
         self.status_bar = QStatusBar()
         self.status_bar.showMessage("就绪")
         main_layout.addWidget(self.status_bar)
+
+        # ── 快捷键设置 ──────────────────────────────────────────
+        hotkey_row = QHBoxLayout()
+        hotkey_row.addWidget(QLabel("<b>⌨ 全局热键：</b>"))
+        self.hotkey_edit = QKeySequenceEdit()
+        self.hotkey_edit.setMaximumWidth(180)
+        self.hotkey_edit.setToolTip("点击后按下组合键即可修改，例如 Ctrl+Alt+E")
+        hotkey_row.addWidget(self.hotkey_edit)
+        hotkey_row.addStretch()
+        main_layout.addLayout(hotkey_row)
 
         # ── 底部按钮 ──────────────────────────────────────────
         btn_layout = QHBoxLayout()
@@ -455,6 +469,13 @@ class ConfigDialog(QDialog):
             self.app_tabs.setCurrentIndex(1)
         elif sys_count == 0 and common_count > 0:
             self.app_tabs.setCurrentIndex(0)
+
+    def _on_hotkey_changed(self):
+        """快捷键修改时立即保存到配置"""
+        seq = self.hotkey_edit.keySequence().toString()
+        if seq:
+            self.config.set_hotkey(seq)
+            self.status_bar.showMessage(f"快捷键已设为 {seq}")
 
     def _filter_apps(self, text: str):
         self._refresh_available_apps(text)

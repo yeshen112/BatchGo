@@ -1,11 +1,14 @@
 """
 BatchGo — 批量应用启动工具
 系统托盘驻留，左键选择分组一键启动，右键打开配置面板。
+全局热键 Ctrl+Alt+B 呼出分组菜单。
 """
 import os
 import sys
 import traceback
 import logging
+import ctypes
+from ctypes import wintypes
 from datetime import datetime
 from functools import wraps
 
@@ -15,7 +18,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import (
     QIcon, QPixmap, QPainter, QColor, QFont, QAction, QCursor,
 )
-from PySide6.QtCore import Qt, QSharedMemory, QTimer, QThread, Signal, QPoint
+from PySide6.QtCore import (Qt, QSharedMemory, QTimer, QThread, Signal,
+                            QPoint, QAbstractNativeEventFilter)
 
 from scanner import scan_and_cache, load_cached_apps
 from config_manager import ConfigManager, AppGroup
@@ -174,6 +178,129 @@ def ensure_single_instance() -> QSharedMemory:
     return shared_mem
 
 
+# ── 全局热键 ──────────────────────────────────────────────────────
+
+MOD_CONTROL = 0x0002
+MOD_ALT     = 0x0001
+MOD_SHIFT   = 0x0004
+MOD_WIN     = 0x0008
+WM_HOTKEY   = 0x0312
+HOTKEY_ID   = 1
+
+# 键名 → Win32 VK 映射
+_KEY_NAME_TO_VK = {}
+for _ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+    _KEY_NAME_TO_VK[_ch] = ord(_ch)
+for _i in range(10):
+    _KEY_NAME_TO_VK[str(_i)] = 0x30 + _i
+for _i in range(1, 13):
+    _KEY_NAME_TO_VK[f"F{_i}"] = 0x6F + _i
+_KEY_NAME_TO_VK.update({
+    "Space": 0x20, "Tab": 0x09, "Enter": 0x0D, "Esc": 0x1B, "Escape": 0x1B,
+    "Backspace": 0x08, "Insert": 0x2D, "Delete": 0x2E, "Home": 0x24,
+    "End": 0x23, "PgUp": 0x21, "PgDown": 0x22, "Left": 0x25,
+    "Right": 0x27, "Up": 0x26, "Down": 0x28, "Pause": 0x13,
+    "Print": 0x2C, "Scroll": 0x91, "NumLock": 0x90,
+    "OEM_3": 0xC0,   # ~ ` 键
+    "OEM_MINUS": 0xBD, "OEM_PLUS": 0xBB, "OEM_COMMA": 0xBC,
+    "OEM_PERIOD": 0xBE, "OEM_1": 0xBA, "OEM_2": 0xBF,
+    "OEM_4": 0xDB, "OEM_5": 0xDC, "OEM_6": 0xDD, "OEM_7": 0xDE,
+})
+# 补充：Qt 用字母键名区分修饰侧，都映射到同一 VK
+for _side, _ch in [("L", "Ctrl"), ("R", "Ctrl"), ("L", "Alt"), ("R", "Alt"),
+                   ("L", "Shift"), ("R", "Shift"), ("L", "Win"), ("R", "Win")]:
+    pass  # Qt KeySequence 表示修饰键，不需要 VK
+
+_MOD_NAME_TO_FLAG = {
+    "Ctrl": MOD_CONTROL, "Alt": MOD_ALT, "Shift": MOD_SHIFT, "Meta": MOD_WIN,
+}
+
+DEFAULT_HOTKEY = "Ctrl+Alt+E"
+
+
+def _parse_hotkey_str(hotkey_str: str) -> tuple[int, int]:
+    """解析 'Ctrl+Alt+E' → (mods, vk)，失败返回默认值"""
+    parts = [p.strip() for p in hotkey_str.split("+")]
+    mods = 0
+    vk = None
+    for p in parts:
+        flag = _MOD_NAME_TO_FLAG.get(p)
+        if flag:
+            mods |= flag
+        else:
+            vk = _KEY_NAME_TO_VK.get(p.upper())
+    if vk is None:
+        # 回退到默认值
+        return MOD_CONTROL | MOD_ALT, 0x45
+    return mods, vk
+
+class GlobalHotkeyFilter(QAbstractNativeEventFilter):
+    """全局热键监听，支持运行时修改热键组合"""
+    def __init__(self, callback):
+        super().__init__()
+        self._callback = callback
+        self._registered = False
+        self._mod = 0
+        self._vk = 0
+
+    def update_hotkey(self, hwnd: int, hotkey_str: str) -> bool:
+        """更换热键（先注销旧的再注册新的）"""
+        self.unregister(hwnd)
+        self._mod, self._vk = _parse_hotkey_str(hotkey_str)
+        return self._do_register(hwnd)
+
+    def register(self, hwnd: int, hotkey_str: str):
+        self._mod, self._vk = _parse_hotkey_str(hotkey_str)
+        self._do_register(hwnd)
+
+    def _do_register(self, hwnd: int) -> bool:
+        if self._registered:
+            return True
+        if not self._mod or not self._vk:
+            return False
+        ok = ctypes.windll.user32.RegisterHotKey(
+            wintypes.HWND(hwnd),
+            HOTKEY_ID,
+            self._mod,
+            self._vk,
+        )
+        self._registered = bool(ok)
+        if not self._registered:
+            _log.warning(f"RegisterHotKey failed (maybe already taken): "
+                         f"error={ctypes.get_last_error()}")
+        else:
+            _log.info(f"Hotkey registered: mod={self._mod:#x} vk={self._vk:#x}")
+        return self._registered
+
+    def unregister(self, hwnd: int):
+        if self._registered:
+            ctypes.windll.user32.UnregisterHotKey(
+                wintypes.HWND(hwnd), HOTKEY_ID,
+            )
+            self._registered = False
+
+    def nativeEventFilter(self, event_type, message):
+        msg = ctypes.c_void_p(int(message))
+        m = ctypes.cast(msg, ctypes.POINTER(MSG)).contents
+        if m.message == WM_HOTKEY and m.wParam == HOTKEY_ID:
+            self._callback()
+            return True, 0
+        return False, 0
+
+
+# MSG struct for native event filter
+class MSG(ctypes.Structure):
+    _fields_ = [
+        ("hwnd",    wintypes.HWND),
+        ("message", wintypes.UINT),
+        ("wParam",  wintypes.WPARAM),
+        ("lParam",  wintypes.LPARAM),
+        ("time",    wintypes.DWORD),
+        ("pt_x",    wintypes.LONG),
+        ("pt_y",    wintypes.LONG),
+    ]
+
+
 # ── 主应用 ────────────────────────────────────────────────────────
 
 class BatchGoApp:
@@ -212,6 +339,13 @@ class BatchGoApp:
         # 显示托盘
         self.tray.show()
         _log.info("Tray icon shown")
+
+        # 全局热键
+        self._hotkey = GlobalHotkeyFilter(self._on_hotkey)
+        self.app.installNativeEventFilter(self._hotkey)
+        # 注册热键需要窗口句柄，放在事件循环开始后
+        self._hotkey_str = self.config.get_hotkey()
+        QTimer.singleShot(100, self._register_hotkey)
 
         # 预热 Qt 菜单渲染，消除首次点击托盘时的卡顿
         warmup = self._build_groups_menu()
@@ -398,6 +532,12 @@ class BatchGoApp:
         if dialog.exec():
             self.config.load()
             self._rebuild_context_menu()
+            self._hotkey_str = self.config.get_hotkey()
+            try:
+                hwnd = int(self.app.effectiveWinId())
+            except Exception:
+                hwnd = 0
+            self._hotkey.update_hotkey(hwnd, self._hotkey_str)
             _log.info("Config dialog closed with changes")
 
     def _refresh_apps(self):
@@ -441,7 +581,8 @@ class BatchGoApp:
             f"<b>{APP_NAME}</b> v{APP_VERSION}<br><br>"
             "批量应用启动工具<br>"
             "左键托盘图标快速启动应用组合<br>"
-            "右键托盘图标打开配置面板<br><br>"
+            "右键托盘图标打开配置面板<br>"
+            f"全局热键 <b>{self.config.get_hotkey()}</b> 呼出菜单<br><br>"
             "支持浏览器 + 网址一键打开<br>"
             f"<br><small>日志文件：{_get_log_path()}</small>",
         )
@@ -454,9 +595,38 @@ class BatchGoApp:
         else:
             self._safe_tray_msg("日志文件不存在", QSystemTrayIcon.Warning, 2000)
 
+    def _register_hotkey(self):
+        """延迟注册全局热键（需要窗口句柄）"""
+        try:
+            hwnd = int(self.app.effectiveWinId())
+        except Exception:
+            hwnd = 0
+        self._hotkey.register(hwnd, self._hotkey_str)
+
+    def _on_hotkey(self):
+        """热键回调：呼出分组菜单"""
+        _log.debug("Hotkey pressed")
+        self._show_groups_menu()
+
+    def set_hotkey(self, hotkey_str: str):
+        """运行时修改全局热键"""
+        self._hotkey_str = hotkey_str
+        try:
+            hwnd = int(self.app.effectiveWinId())
+        except Exception:
+            hwnd = 0
+        self._hotkey.update_hotkey(hwnd, hotkey_str)
+        self.config.set_hotkey(hotkey_str)
+        _log.info(f"Hotkey changed to {hotkey_str}")
+
     def _quit(self):
         """退出应用"""
         _log.info("BatchGo exiting...")
+        try:
+            hwnd = int(self.app.effectiveWinId())
+        except Exception:
+            hwnd = 0
+        self._hotkey.unregister(hwnd)
         self.tray.hide()
         self.app.quit()
 
