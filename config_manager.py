@@ -220,3 +220,12 @@ class ConfigManager:
     def set_auto_start(self, enabled: bool):
         self._data["auto_start"] = enabled
         self.save()
+
+    # ── 全局热键 ──────────────────────────────────────────────
+
+    def get_hotkey(self) -> str:
+        return self._data.get("hotkey", "Ctrl+Alt+E")
+
+    def set_hotkey(self, hotkey_str: str):
+        self._data["hotkey"] = hotkey_str
+        self.save()
