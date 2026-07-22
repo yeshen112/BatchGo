@@ -2,18 +2,40 @@
 启动引擎 —— 按分组批量启动应用程序。
 支持浏览器 + URL、独立窗口启动。
 子进程完全脱离父进程，关闭终端不影响已启动的应用。
+支持以管理员身份运行（UAC 提权）。
 """
 import os
 import sys
 import subprocess
 import webbrowser
 import traceback
+import ctypes
 
 from config_manager import AppGroup, AppEntry
 
 # 模块级 logger
 import logging
 _log = logging.getLogger("BatchGo")
+
+
+# ── 管理员提权启动 ──────────────────────────────────────────────────
+
+def _run_as_admin(exe_path: str, args: str = "", cwd: str = "") -> bool:
+    """通过 ShellExecute runas 以管理员身份启动，触发 UAC 弹窗"""
+    try:
+        ret = ctypes.windll.shell32.ShellExecuteW(
+            None,                # hwnd
+            "runas",             # 提权动词
+            exe_path,            # 可执行文件
+            args or None,        # 参数
+            cwd or None,         # 工作目录
+            1,                   # SW_SHOWNORMAL
+        )
+        # ShellExecute 返回值 > 32 表示成功
+        return ret > 32
+    except Exception:
+        _log.error(f"ShellExecute runas failed:\n{traceback.format_exc()}")
+        return False
 
 
 # ── 已知浏览器可执行文件名（小写） ────────────────────────────────
@@ -81,6 +103,10 @@ def launch_app(entry: AppEntry) -> bool:
             cmd.extend(args_str.split())
 
         cwd = working_dir if working_dir and os.path.isdir(working_dir) else None
+
+        # 管理员身份运行（UAC 提权）
+        if getattr(entry, "run_as_admin", False) and sys.platform == "win32":
+            return _run_as_admin(path, args_str, cwd or "")
 
         if sys.platform == "win32":
             subprocess.Popen(
