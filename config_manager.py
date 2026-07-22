@@ -104,7 +104,7 @@ class ConfigManager:
         # 确保关键字段存在
         self._data.setdefault("groups", [])
         self._data.setdefault("apps_cache", [])
-        self._data.setdefault("auto_start", False)
+        self._data.setdefault("auto_start", True)
 
     def save(self):
         """将当前配置写入文件"""

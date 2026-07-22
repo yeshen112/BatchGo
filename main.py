@@ -194,6 +194,10 @@ class BatchGoApp:
         _log.info(f"Config loaded: {len(groups)} groups, "
                   f"{len(self.config.get_cached_apps())} cached apps")
 
+        # 开机自启默认开启：首次运行或配置为 True 时确保 VBS 文件存在
+        if self.config.get_auto_start() and not is_auto_start_enabled():
+            enable_auto_start()
+
         # 托盘图标
         self.tray = QSystemTrayIcon()
         self.tray.setIcon(create_tray_icon())
@@ -208,6 +212,11 @@ class BatchGoApp:
         # 显示托盘
         self.tray.show()
         _log.info("Tray icon shown")
+
+        # 预热 Qt 菜单渲染，消除首次点击托盘时的卡顿
+        warmup = self._build_groups_menu()
+        warmup.adjustSize()
+        warmup.deleteLater()
 
         # 首次启动：如果没有缓存，自动扫描
         cached = self.config.get_cached_apps()
@@ -252,10 +261,6 @@ class BatchGoApp:
         action_config = QAction("⚙ 配置面板", menu)
         action_config.triggered.connect(lambda: self._safe_call(self._open_config))
         menu.addAction(action_config)
-
-        action_refresh = QAction("🔄 刷新应用列表", menu)
-        action_refresh.triggered.connect(lambda: self._safe_call(self._refresh_apps))
-        menu.addAction(action_refresh)
 
         menu.addSeparator()
 

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLineEdit, QLabel, QTabWidget,
     QMessageBox, QInputDialog, QAbstractItemView,
     QProgressBar, QStatusBar, QWidget,
+    QFileDialog, QFormLayout, QDialogButtonBox,
 )
 from PySide6.QtCore import Qt, QSize, QThread, Signal
 from PySide6.QtGui import QIcon
@@ -203,9 +204,15 @@ class ConfigDialog(QDialog):
 
         layout.addWidget(self.app_tabs)
 
+        btn_row = QHBoxLayout()
         btn_add = QPushButton("➕ 添加到当前组合")
         btn_add.clicked.connect(self._add_apps_to_group)
-        layout.addWidget(btn_add)
+        btn_row.addWidget(btn_add)
+
+        btn_custom = QPushButton("✏️ 自定义添加...")
+        btn_custom.clicked.connect(self._custom_add_app)
+        btn_row.addWidget(btn_custom)
+        layout.addLayout(btn_row)
 
         return widget
 
@@ -438,11 +445,37 @@ class ConfigDialog(QDialog):
                 self.common_list.addItem(item)
 
         # 更新 Tab 标签上的计数
-        self.app_tabs.setTabText(0, f"⭐ 常用应用 ({self.common_list.count()})")
-        self.app_tabs.setTabText(1, f"🔧 系统工具 ({self.system_list.count()})")
+        common_count = self.common_list.count()
+        sys_count = self.system_list.count()
+        self.app_tabs.setTabText(0, f"⭐ 常用应用 ({common_count})")
+        self.app_tabs.setTabText(1, f"🔧 系统工具 ({sys_count})")
+
+        # 智能切换 Tab：一边为空另一边有结果时自动跳转
+        if common_count == 0 and sys_count > 0:
+            self.app_tabs.setCurrentIndex(1)
+        elif sys_count == 0 and common_count > 0:
+            self.app_tabs.setCurrentIndex(0)
 
     def _filter_apps(self, text: str):
         self._refresh_available_apps(text)
+
+    _MAX_APPS_WARN = 10  # 超过此数量弹警告
+
+    def _warn_too_many(self, add_count: int) -> bool:
+        """检查添加后是否超过警戒线，超过则弹窗确认。返回 True 表示继续。"""
+        group = self.config.get_group(self._current_group_name)
+        current = len(group.entries) if group else 0
+        after = current + add_count
+        if after <= self._MAX_APPS_WARN:
+            return True
+        reply = QMessageBox.question(
+            self, "确认添加",
+            f"组合「{self._current_group_name}」当前已有 {current} 个应用，\n"
+            f"添加后将达到 {after} 个。\n\n"
+            "同时启动过多应用可能导致系统卡顿，是否继续？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        return reply == QMessageBox.Yes
 
     def _add_apps_to_group(self):
         """将选中的可用应用添加到当前分组"""
@@ -454,6 +487,9 @@ class ConfigDialog(QDialog):
         selected = current_list.selectedItems()
         if not selected:
             QMessageBox.information(self, "提示", "请先在应用列表中选中要添加的应用")
+            return
+
+        if not self._warn_too_many(len(selected)):
             return
 
         added = 0
@@ -470,3 +506,94 @@ class ConfigDialog(QDialog):
 
         if added > 0:
             self.status_bar.showMessage(f"已添加 {added} 个应用到「{self._current_group_name}」")
+
+    def _custom_add_app(self):
+        """手动添加一个扫不到的应用"""
+        if not self._current_group_name:
+            QMessageBox.information(self, "提示", "请先在左侧选择或新建一个组合")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("自定义添加应用")
+        dialog.setMinimumWidth(460)
+        dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout(dialog)
+
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignRight)
+
+        name_edit = QLineEdit()
+        name_edit.setPlaceholderText("例如：微信")
+        form.addRow("应用名称：", name_edit)
+
+        # 路径行：输入框 + 浏览按钮
+        path_row = QHBoxLayout()
+        path_edit = QLineEdit()
+        path_edit.setPlaceholderText("可执行文件 (.exe) 或 UWP AUMID")
+        path_row.addWidget(path_edit)
+        btn_browse = QPushButton("浏览...")
+        btn_browse.clicked.connect(lambda: self._browse_exe(path_edit))
+        path_row.addWidget(btn_browse)
+        form.addRow("程序路径：", path_row)
+
+        workdir_edit = QLineEdit()
+        workdir_edit.setPlaceholderText("留空则使用程序所在目录")
+        form.addRow("工作目录：", workdir_edit)
+
+        args_edit = QLineEdit()
+        args_edit.setPlaceholderText("例如：--no-sandbox")
+        form.addRow("启动参数：", args_edit)
+
+        url_edit = QLineEdit()
+        url_edit.setPlaceholderText("如果程序是浏览器，可填网址一并打开")
+        form.addRow("附加网址：", url_edit)
+
+        layout.addLayout(form)
+
+        # 按钮
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        name = name_edit.text().strip()
+        path = path_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "提示", "请输入应用名称")
+            return
+        if not path:
+            QMessageBox.warning(self, "提示", "请填写程序路径或点击「浏览」选择")
+            return
+
+        if not self._warn_too_many(1):
+            return
+
+        entry = AppEntry(
+            name=name,
+            path=path,
+            arguments=args_edit.text().strip(),
+            working_dir=workdir_edit.text().strip(),
+            url=url_edit.text().strip(),
+            is_uwp=("!" in path and not os.path.exists(path)),
+        )
+        if self.config.add_entry(self._current_group_name, entry):
+            self.config.load()
+            self._refresh_entry_table()
+            self._refresh_group_list()
+            self.status_bar.showMessage(f"已添加「{name}」到「{self._current_group_name}」")
+        else:
+            QMessageBox.warning(self, "提示", "添加失败，可能已存在同名同路径的应用")
+
+    def _browse_exe(self, line_edit: QLineEdit):
+        """弹出文件选择框，筛选 .exe 文件"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择可执行文件",
+            line_edit.text() or os.environ.get("ProgramFiles", "C:\\"),
+            "可执行文件 (*.exe);;所有文件 (*.*)",
+        )
+        if path:
+            line_edit.setText(path)
