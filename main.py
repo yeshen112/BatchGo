@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import (
     QIcon, QPixmap, QPainter, QColor, QFont, QAction, QCursor,
 )
-from PySide6.QtCore import Qt, QSharedMemory, QTimer, QThread, Signal
+from PySide6.QtCore import Qt, QSharedMemory, QTimer, QThread, Signal, QPoint
 
 from scanner import scan_and_cache, load_cached_apps
 from config_manager import ConfigManager, AppGroup
@@ -284,7 +284,6 @@ class BatchGoApp:
         action_exit.triggered.connect(self._quit)
         menu.addAction(action_exit)
 
-        self.tray.setContextMenu(menu)
         self._context_menu = menu
 
     def _build_groups_menu(self) -> QMenu:
@@ -332,19 +331,38 @@ class BatchGoApp:
     def _on_tray_activated(self, reason):
         """托盘图标被点击"""
         _log.debug(f"Tray activated: reason={reason}")
-        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick,
-                       QSystemTrayIcon.MiddleClick):
+        if reason == QSystemTrayIcon.Context:
+            self._show_context_menu()
+        elif reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick,
+                        QSystemTrayIcon.MiddleClick):
             self._show_groups_menu()
 
+    @staticmethod
+    def _menu_pos(menu: QMenu) -> QPoint:
+        """计算菜单位置：鼠标右上角"""
+        pos = QCursor.pos()
+        h = menu.sizeHint().height()
+        pos.setY(max(0, pos.y() - h))
+        return pos
+
+    def _show_context_menu(self):
+        """在鼠标右上角显示右键菜单"""
+        _log.debug("Showing context menu")
+        try:
+            menu = self._context_menu
+            if menu is None:
+                return
+            menu.exec(self._menu_pos(menu))
+        except Exception:
+            _log.error(f"Show context menu failed:\n{traceback.format_exc()}")
+
     def _show_groups_menu(self):
-        """在鼠标位置显示分组选择菜单（同步 exec，避免 GC 导致的 segfault）"""
+        """在鼠标右上角显示分组选择菜单"""
         _log.debug("Showing groups menu")
         try:
             menu = self._build_groups_menu()
             self._groups_menu = menu  # 保持引用
-            # 用 exec() 替代 popup()：同步执行，阻塞直到用户选择或取消
-            # 彻底避免 popup() 异步模式下 Qt 事件处理时的 C++ 层崩溃
-            menu.exec(QCursor.pos())
+            menu.exec(self._menu_pos(menu))
         except Exception:
             _log.error(f"Show groups menu failed:\n{traceback.format_exc()}")
         finally:
