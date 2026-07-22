@@ -126,7 +126,11 @@ class ConfigDialog(QDialog):
 
         self.group_list = QListWidget()
         self.group_list.setAlternatingRowColors(True)
+        self.group_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.group_list.setDefaultDropAction(Qt.MoveAction)
         self.group_list.currentItemChanged.connect(self._on_group_selected)
+        # 拖拽排序后保存新顺序
+        self.group_list.model().rowsMoved.connect(self._on_groups_reordered)
         layout.addWidget(self.group_list)
 
         btn_layout = QHBoxLayout()
@@ -287,6 +291,18 @@ class ConfigDialog(QDialog):
                 if item.data(Qt.UserRole) == saved_name:
                     self.group_list.setCurrentItem(item)
                     break
+
+    def _on_groups_reordered(self):
+        """拖拽排序分组后保存新顺序"""
+        names = []
+        for i in range(self.group_list.count()):
+            item = self.group_list.item(i)
+            if item:
+                names.append(item.data(Qt.UserRole))
+        if names:
+            self.config.reorder_groups(names)
+            self.config.load()
+            self._refresh_group_list()
 
     def _on_group_selected(self, current, previous):
         if current is None:
