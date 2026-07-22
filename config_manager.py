@@ -143,6 +143,15 @@ class ConfigManager:
                 return True
         return False
 
+    def reorder_groups(self, names: list[str]):
+        """按给定名称顺序重排分组"""
+        groups = self._data["groups"]
+        if len(names) != len(groups):
+            return
+        old = {g["name"]: g for g in groups}
+        self._data["groups"] = [old[n] for n in names if n in old]
+        self.save()
+
     def rename_group(self, old_name: str, new_name: str) -> bool:
         """重命名分组"""
         if old_name == new_name:
