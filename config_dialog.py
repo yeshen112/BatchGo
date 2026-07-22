@@ -55,7 +55,7 @@ class ConfigDialog(QDialog):
         self.setWindowTitle("BatchGo 配置面板")
         self.resize(860, 580)
         self.setMinimumSize(720, 480)
-        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
 
         self._build_ui()
         self._load_apps()
