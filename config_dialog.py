@@ -158,10 +158,14 @@ class ConfigDialog(QDialog):
 
         layout.addWidget(QLabel("<b>📋 组合中的应用</b>"))
 
-        self.entry_table = QTableWidget(0, 3)
-        self.entry_table.setHorizontalHeaderLabels(["应用名称", "URL/网址", "启动参数"])
-        for col in range(3):
-            self.entry_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.Stretch)
+        self.entry_table = QTableWidget(0, 4)
+        self.entry_table.setHorizontalHeaderLabels(["应用名称", "URL/网址", "启动参数", "管理员"])
+        # 第 4 列（管理员）固定宽度，其余 stretch
+        self.entry_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.entry_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.entry_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.entry_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Fixed)
+        self.entry_table.setColumnWidth(3, 56)
         self.entry_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.entry_table.setEditTriggers(QAbstractItemView.DoubleClicked)
         self.entry_table.verticalHeader().setVisible(False)
@@ -406,6 +410,15 @@ class ConfigDialog(QDialog):
             args_item.setToolTip("额外启动参数")
             self.entry_table.setItem(row, 2, args_item)
 
+            # 管理员勾选框
+            admin_item = QTableWidgetItem("")
+            admin_item.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            admin_item.setCheckState(
+                Qt.Checked if getattr(entry, "run_as_admin", False) else Qt.Unchecked
+            )
+            admin_item.setToolTip("以管理员身份运行（启动时弹出 UAC 确认）")
+            self.entry_table.setItem(row, 3, admin_item)
+
         self.entry_table.blockSignals(False)
 
     def _on_entry_changed(self, item: QTableWidgetItem):
@@ -418,12 +431,14 @@ class ConfigDialog(QDialog):
         if name_item is None:
             return
 
+        admin_item = self.entry_table.item(row, 3)
         entry = AppEntry(
             name=name_item.text(),
             path=name_item.data(Qt.UserRole),
             working_dir=name_item.data(Qt.UserRole + 1),
             url=url_item.text().strip() if url_item else "",
             arguments=args_item.text().strip() if args_item else "",
+            run_as_admin=admin_item.checkState() == Qt.Checked if admin_item else False,
         )
         self.config.update_entry(self._current_group_name, row, entry)
 

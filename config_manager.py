@@ -20,6 +20,7 @@ class AppEntry:
     working_dir: str = ""       # 工作目录
     url: str = ""               # 浏览器打开时附加的网址
     is_uwp: bool = False        # 是否为 UWP / 微软商店应用
+    run_as_admin: bool = False  # 是否以管理员身份运行
 
     def to_dict(self) -> dict:
         return {
@@ -29,6 +30,7 @@ class AppEntry:
             "working_dir": self.working_dir,
             "url": self.url,
             "is_uwp": self.is_uwp,
+            "run_as_admin": self.run_as_admin,
         }
 
     @classmethod
@@ -40,6 +42,7 @@ class AppEntry:
             working_dir=d.get("working_dir", ""),
             url=d.get("url", ""),
             is_uwp=d.get("is_uwp", False),
+            run_as_admin=d.get("run_as_admin", False),
         )
 
     @classmethod
