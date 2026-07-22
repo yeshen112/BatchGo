@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QInputDialog, QAbstractItemView,
     QProgressBar, QStatusBar, QWidget,
     QFileDialog, QFormLayout, QDialogButtonBox,
-    QKeySequenceEdit,
+    QKeySequenceEdit, QFileIconProvider, QComboBox,
 )
 from PySide6.QtCore import Qt, QSize, QThread, Signal
 from PySide6.QtGui import QIcon
@@ -396,8 +396,20 @@ class ConfigDialog(QDialog):
             name_item.setData(Qt.UserRole, entry.path)
             name_item.setData(Qt.UserRole + 1, entry.working_dir)
 
-            # 使用 icon_utils 获取高质量图标
-            icon = get_app_icon(entry.path)
+            # 图标：文件夹用文件夹图标，文件用类型图标，应用用 exe 图标
+            if getattr(entry, "is_folder", False):
+                icon = QFileIconProvider().icon(QFileIconProvider.Folder)
+            elif getattr(entry, "is_file", False):
+                info = os.path.join(
+                    entry.working_dir or os.path.dirname(entry.path) or "",
+                    os.path.basename(entry.path),
+                ) if entry.path else ""
+                icon = QFileIconProvider().icon(QFileIconProvider.Drive)  # fallback
+                if info:
+                    from PySide6.QtCore import QFileInfo
+                    icon = QFileIconProvider().icon(QFileInfo(info))
+            else:
+                icon = get_app_icon(entry.path)
             if icon and not icon.isNull():
                 name_item.setIcon(icon)
             self.entry_table.setItem(row, 0, name_item)
@@ -563,47 +575,77 @@ class ConfigDialog(QDialog):
         if added > 0:
             self.status_bar.showMessage(f"已添加 {added} 个应用到「{self._current_group_name}」")
 
+    _ENTRY_TYPES = [
+        ("应用程序", "可执行文件 (.exe) 或 UWP AUMID"),
+        ("文件夹",   "文件夹路径，启动时用资源管理器打开"),
+        ("文件",     "任意文件（文档/图片/音乐等），用系统关联程序打开"),
+    ]
+
     def _custom_add_app(self):
-        """手动添加一个扫不到的应用"""
+        """手动添加扫不到的应用 / 文件夹 / 文件"""
         if not self._current_group_name:
             QMessageBox.information(self, "提示", "请先在左侧选择或新建一个组合")
             return
 
         dialog = QDialog(self)
-        dialog.setWindowTitle("自定义添加应用")
-        dialog.setMinimumWidth(460)
+        dialog.setWindowTitle("自定义添加")
+        dialog.setMinimumWidth(500)
         dialog.setWindowFlags(dialog.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
         layout = QVBoxLayout(dialog)
-
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight)
 
         name_edit = QLineEdit()
-        name_edit.setPlaceholderText("例如：微信")
-        form.addRow("应用名称：", name_edit)
+        name_edit.setPlaceholderText("例如：论文资料")
+        form.addRow("名称：", name_edit)
+
+        # 类型下拉框
+        type_combo = QComboBox()
+        for label, _tip in self._ENTRY_TYPES:
+            type_combo.addItem(label)
+        form.addRow("类型：", type_combo)
 
         # 路径行：输入框 + 浏览按钮
         path_row = QHBoxLayout()
         path_edit = QLineEdit()
-        path_edit.setPlaceholderText("可执行文件 (.exe) 或 UWP AUMID")
+        path_edit.setPlaceholderText(self._ENTRY_TYPES[0][1])
         path_row.addWidget(path_edit)
         btn_browse = QPushButton("浏览...")
-        btn_browse.clicked.connect(lambda: self._browse_exe(path_edit))
+        btn_browse.clicked.connect(lambda: self._browse_path(path_edit, name_edit, type_combo.currentIndex()))
         path_row.addWidget(btn_browse)
-        form.addRow("程序路径：", path_row)
+        path_label = QLabel("路径：")
+        form.addRow(path_label, path_row)
 
+        # 工作目录 & 参数（仅应用程序需要）
         workdir_edit = QLineEdit()
         workdir_edit.setPlaceholderText("留空则使用程序所在目录")
-        form.addRow("工作目录：", workdir_edit)
+        workdir_label = QLabel("工作目录：")
+        form.addRow(workdir_label, workdir_edit)
 
         args_edit = QLineEdit()
         args_edit.setPlaceholderText("例如：--no-sandbox")
-        form.addRow("启动参数：", args_edit)
+        args_label = QLabel("启动参数：")
+        form.addRow(args_label, args_edit)
 
         url_edit = QLineEdit()
-        url_edit.setPlaceholderText("如果程序是浏览器，可填网址一并打开")
+        url_edit.setPlaceholderText("如果是浏览器，可填网址一并打开")
         form.addRow("附加网址：", url_edit)
+
+        # 类型切换时：更新占位符、显隐工作目录和参数行
+        def _on_type_changed(idx: int):
+            path_edit.setPlaceholderText(self._ENTRY_TYPES[idx][1])
+            if idx == 0:  # 应用程序
+                workdir_label.setVisible(True)
+                workdir_edit.setVisible(True)
+                args_label.setVisible(True)
+                args_edit.setVisible(True)
+            else:  # 文件夹 / 文件
+                workdir_label.setVisible(False)
+                workdir_edit.setVisible(False)
+                args_label.setVisible(False)
+                args_edit.setVisible(False)
+        type_combo.currentIndexChanged.connect(_on_type_changed)
 
         layout.addLayout(form)
 
@@ -618,38 +660,78 @@ class ConfigDialog(QDialog):
 
         name = name_edit.text().strip()
         path = path_edit.text().strip()
+        idx = type_combo.currentIndex()
+
         if not name:
-            QMessageBox.warning(self, "提示", "请输入应用名称")
+            QMessageBox.warning(self, "提示", "请输入名称")
             return
         if not path:
-            QMessageBox.warning(self, "提示", "请填写程序路径或点击「浏览」选择")
+            QMessageBox.warning(self, "提示", "请填写路径或点击「浏览」选择")
             return
 
         if not self._warn_too_many(1):
             return
 
-        entry = AppEntry(
-            name=name,
-            path=path,
-            arguments=args_edit.text().strip(),
-            working_dir=workdir_edit.text().strip(),
-            url=url_edit.text().strip(),
-            is_uwp=("!" in path and not os.path.exists(path)),
-        )
+        # 根据类型构造 AppEntry
+        if idx == 0:
+            # 应用程序
+            entry = AppEntry(
+                name=name, path=path,
+                arguments=args_edit.text().strip(),
+                working_dir=workdir_edit.text().strip(),
+                url=url_edit.text().strip(),
+                is_uwp=("!" in path and not os.path.exists(path)),
+            )
+        elif idx == 1:
+            # 文件夹
+            entry = AppEntry(
+                name=name, path=path,
+                url=url_edit.text().strip(),
+                is_folder=True,
+            )
+        else:
+            # 文件
+            entry = AppEntry(
+                name=name, path=path,
+                url=url_edit.text().strip(),
+                is_file=True,
+            )
+
         if self.config.add_entry(self._current_group_name, entry):
             self.config.load()
             self._refresh_entry_table()
             self._refresh_group_list()
-            self.status_bar.showMessage(f"已添加「{name}」到「{self._current_group_name}」")
+            type_label = self._ENTRY_TYPES[idx][0]
+            self.status_bar.showMessage(f"已添加{type_label}「{name}」到「{self._current_group_name}」")
         else:
-            QMessageBox.warning(self, "提示", "添加失败，可能已存在同名同路径的应用")
+            QMessageBox.warning(self, "提示", "添加失败，可能已存在同名同路径的条目")
 
-    def _browse_exe(self, line_edit: QLineEdit):
-        """弹出文件选择框，筛选 .exe 文件"""
-        path, _ = QFileDialog.getOpenFileName(
-            self, "选择可执行文件",
-            line_edit.text() or os.environ.get("ProgramFiles", "C:\\"),
-            "可执行文件 (*.exe);;所有文件 (*.*)",
-        )
-        if path:
-            line_edit.setText(path)
+    def _browse_path(self, path_edit: QLineEdit, name_edit: QLineEdit, type_idx: int):
+        """根据类型弹出文件或文件夹选择框"""
+        if type_idx == 1:
+            # 文件夹
+            folder = QFileDialog.getExistingDirectory(
+                self, "选择文件夹",
+                path_edit.text() or os.path.expanduser("~"),
+            )
+            if folder:
+                path_edit.setText(folder)
+                if not name_edit.text().strip():
+                    name_edit.setText(os.path.basename(folder))
+        else:
+            # 应用程序 / 文件
+            if type_idx == 0:
+                title = "选择可执行文件"
+                filter_str = "可执行文件 (*.exe);;所有文件 (*.*)"
+                default_dir = path_edit.text() or os.environ.get("ProgramFiles", "C:\\")
+            else:
+                title = "选择文件"
+                filter_str = "所有文件 (*.*)"
+                default_dir = path_edit.text() or os.path.expanduser("~")
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, title, default_dir, filter_str,
+            )
+            if file_path:
+                path_edit.setText(file_path)
+                if not name_edit.text().strip():
+                    name_edit.setText(os.path.splitext(os.path.basename(file_path))[0])

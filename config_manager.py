@@ -20,6 +20,8 @@ class AppEntry:
     working_dir: str = ""       # 工作目录
     url: str = ""               # 浏览器打开时附加的网址
     is_uwp: bool = False        # 是否为 UWP / 微软商店应用
+    is_folder: bool = False     # 是否为文件夹（资源管理器打开）
+    is_file: bool = False       # 是否为普通文件（关联程序打开）
     run_as_admin: bool = False  # 是否以管理员身份运行
 
     def to_dict(self) -> dict:
@@ -30,6 +32,8 @@ class AppEntry:
             "working_dir": self.working_dir,
             "url": self.url,
             "is_uwp": self.is_uwp,
+            "is_folder": self.is_folder,
+            "is_file": self.is_file,
             "run_as_admin": self.run_as_admin,
         }
 
@@ -42,6 +46,8 @@ class AppEntry:
             working_dir=d.get("working_dir", ""),
             url=d.get("url", ""),
             is_uwp=d.get("is_uwp", False),
+            is_folder=d.get("is_folder", False),
+            is_file=d.get("is_file", False),
             run_as_admin=d.get("run_as_admin", False),
         )
 

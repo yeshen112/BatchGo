@@ -5,8 +5,11 @@ BatchGo — 批量应用启动工具
 """
 import os
 import sys
+import json
 import traceback
 import logging
+import webbrowser
+import urllib.request
 import ctypes
 from ctypes import wintypes
 from datetime import datetime
@@ -83,7 +86,8 @@ sys.excepthook = _global_exception_handler
 # ── 常量 ──────────────────────────────────────────────────────────
 
 APP_NAME = "BatchGo"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.3.0"
+REPO_URL = "https://github.com/yeshen112/BatchGo"
 
 
 # ── 后台扫描线程 ──────────────────────────────────────────────────
@@ -575,17 +579,98 @@ class BatchGoApp:
     @_log_errors
     def _show_about(self):
         """显示关于对话框"""
-        QMessageBox.about(
-            None,
-            f"关于 {APP_NAME}",
-            f"<b>{APP_NAME}</b> v{APP_VERSION}<br><br>"
-            "批量应用启动工具<br>"
-            "左键托盘图标快速启动应用组合<br>"
-            "右键托盘图标打开配置面板<br>"
-            f"全局热键 <b>{self.config.get_hotkey()}</b> 呼出菜单<br><br>"
-            "支持浏览器 + 网址一键打开<br>"
-            f"<br><small>日志文件：{_get_log_path()}</small>",
+        msg = QMessageBox()
+        msg.setWindowTitle(f"关于 {APP_NAME}")
+        msg.setIcon(QMessageBox.Information)
+
+        # 文字内容：可选中复制
+        msg.setText(
+            f"<h3>{APP_NAME} v{APP_VERSION}</h3>"
+            f"<p>批量应用启动工具 — 一键启动自定义应用组合</p>"
+            f"<p>"
+            f"🔗 <a href='{REPO_URL}'>{REPO_URL}</a><br>"
+            f"📧 1712274966@qq.com"
+            f"</p>"
         )
+        msg.setTextFormat(Qt.RichText)
+        msg.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
+
+        # 去掉默认按钮，自己加
+        msg.setStandardButtons(QMessageBox.NoButton)
+
+        # 检查更新按钮（无图标前缀）
+        btn_update = msg.addButton("检查更新", QMessageBox.ActionRole)
+        btn_update.clicked.connect(lambda: self._check_update(msg))
+
+        btn_close = msg.addButton("关闭", QMessageBox.RejectRole)
+        msg.setEscapeButton(btn_close)
+
+        msg.exec()
+
+    def _check_update(self, parent: QMessageBox | None = None):
+        """从 GitHub Releases API 检查最新版本"""
+        import re
+        api_url = "https://api.github.com/repos/yeshen112/BatchGo/releases/latest"
+
+        try:
+            req = urllib.request.Request(api_url)
+            req.add_header("Accept", "application/vnd.github+json")
+            req.add_header("User-Agent", f"{APP_NAME}/{APP_VERSION}")
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            _log.warning(f"Update check failed: {e}")
+            if parent:
+                QMessageBox.warning(
+                    parent, "检查更新",
+                    f"无法获取更新信息。\n\n{_simple_error(e)}",
+                )
+            else:
+                self._safe_tray_msg("检查更新失败，请检查网络", QSystemTrayIcon.Warning, 3000)
+            return
+
+        latest_tag = data.get("tag_name", "")
+        latest_ver = latest_tag.lstrip("v")
+        html_url = data.get("html_url", REPO_URL)
+
+        # 简单版本比较
+        try:
+            newer = _version_newer(latest_ver, APP_VERSION)
+        except Exception:
+            newer = None
+
+        if newer is None:
+            info_text = (
+                f"当前版本：v{APP_VERSION}\n"
+                f"最新版本：{latest_tag}\n\n"
+                f"前往下载：{html_url}"
+            )
+            m = QMessageBox.information(
+                parent, "检查更新", info_text,
+                QMessageBox.Ok,
+            )
+        elif newer:
+            info_text = (
+                f"🎉 发现新版本！\n\n"
+                f"当前版本：v{APP_VERSION}\n"
+                f"最新版本：<b>{latest_tag}</b>\n\n"
+                f"{data.get('body', '').strip()[:200]}\n\n"
+                f"是否前往下载？"
+            )
+            reply = QMessageBox.question(
+                parent, "检查更新", info_text,
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
+            )
+            if reply == QMessageBox.Yes:
+                webbrowser.open(html_url)
+        else:
+            QMessageBox.information(
+                parent, "检查更新",
+                f"✅ 已是最新版本！\n\n"
+                f"当前版本：v{APP_VERSION}\n"
+                f"最新版本：{latest_tag}",
+                QMessageBox.Ok,
+            )
 
     def _open_log(self):
         """用记事本打开日志文件"""
@@ -645,6 +730,29 @@ def _get_log_path() -> str:
         base_dir = os.path.dirname(os.path.abspath(__file__))
     today = datetime.now().strftime("%Y-%m-%d")
     return os.path.join(base_dir, "logs", f"batchgo_{today}.log")
+
+
+def _simple_error(exc: Exception) -> str:
+    """提取异常的精简描述，用于弹窗提示"""
+    msg = str(exc).strip()
+    if len(msg) > 120:
+        msg = msg[:120] + "..."
+    return msg or type(exc).__name__
+
+
+def _version_newer(latest: str, current: str) -> bool | None:
+    """比较语义版本号，latest > current 返回 True；解析失败返回 None"""
+    try:
+        lp = [int(x) for x in latest.split(".")]
+        cp = [int(x) for x in current.split(".")]
+        # 补齐长度
+        while len(lp) < len(cp):
+            lp.append(0)
+        while len(cp) < len(lp):
+            cp.append(0)
+        return lp > cp
+    except (ValueError, TypeError):
+        return None
 
 
 # ── 入口 ──────────────────────────────────────────────────────────

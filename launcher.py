@@ -61,6 +61,7 @@ def launch_app(entry: AppEntry) -> bool:
     启动单个应用。子进程完全脱离父进程。
 
     规则：
+    - 文件夹/文件 → 系统关联程序打开（os.startfile）
     - UWP 应用 → 通过 shell:AppsFolder 启动
     - 仅有 URL → 默认浏览器打开
     - 有 path → Popen 启动（独立进程组）
@@ -75,7 +76,16 @@ def launch_app(entry: AppEntry) -> bool:
     is_uwp = getattr(entry, "is_uwp", False)
 
     try:
-        # 情况 0：UWP 应用 → 通过 shell:AppsFolder 启动
+        # 情况 0：文件夹/文件 → 系统关联程序打开
+        if getattr(entry, "is_folder", False) or getattr(entry, "is_file", False):
+            if path and os.path.exists(path):
+                os.startfile(path)
+                if url:
+                    webbrowser.open(url)
+                return True
+            return False
+
+        # 情况 1：UWP 应用 → 通过 shell:AppsFolder 启动
         if is_uwp and path:
             if sys.platform == "win32":
                 subprocess.Popen(
@@ -87,7 +97,7 @@ def launch_app(entry: AppEntry) -> bool:
                 return True
             return False
 
-        # 情况 1：仅有 URL → 默认浏览器打开
+        # 情况 2：仅有 URL → 默认浏览器打开
         if not path and url:
             webbrowser.open(url)
             return True
@@ -95,7 +105,7 @@ def launch_app(entry: AppEntry) -> bool:
         if not path:
             return False
 
-        # 情况 2：传统应用
+        # 情况 3：传统应用
         cmd = [path]
         if url:
             cmd.append(url)
