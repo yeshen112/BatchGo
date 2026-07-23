@@ -99,7 +99,8 @@ def launch_app(entry: AppEntry) -> bool:
 
         # 情况 2：仅有 URL → 默认浏览器打开
         if not path and url:
-            webbrowser.open(url)
+            for u in url.split():
+                webbrowser.open(u)
             return True
 
         if not path:
@@ -108,7 +109,7 @@ def launch_app(entry: AppEntry) -> bool:
         # 情况 3：传统应用
         cmd = [path]
         if url:
-            cmd.append(url)
+            cmd.extend(url.split())
         if args_str:
             cmd.extend(args_str.split())
 

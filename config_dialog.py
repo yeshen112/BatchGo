@@ -391,7 +391,6 @@ class ConfigDialog(QDialog):
             self.entry_table.insertRow(row)
 
             name_item = QTableWidgetItem(entry.name)
-            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
             name_item.setToolTip(entry.path)
             name_item.setData(Qt.UserRole, entry.path)
             name_item.setData(Qt.UserRole + 1, entry.working_dir)
@@ -415,7 +414,7 @@ class ConfigDialog(QDialog):
             self.entry_table.setItem(row, 0, name_item)
 
             url_item = QTableWidgetItem(entry.url)
-            url_item.setToolTip("浏览器启动时打开的网址")
+            url_item.setToolTip("浏览器启动时打开的网址，多个用空格隔开")
             self.entry_table.setItem(row, 1, url_item)
 
             args_item = QTableWidgetItem(entry.arguments)
@@ -629,7 +628,7 @@ class ConfigDialog(QDialog):
         form.addRow(args_label, args_edit)
 
         url_edit = QLineEdit()
-        url_edit.setPlaceholderText("如果是浏览器，可填网址一并打开")
+        url_edit.setPlaceholderText("浏览器网址，多个用空格隔开（如：https://a.com https://b.com）")
         form.addRow("附加网址：", url_edit)
 
         # 类型切换时：更新占位符、显隐工作目录和参数行
