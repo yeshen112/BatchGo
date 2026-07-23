@@ -86,7 +86,7 @@ sys.excepthook = _global_exception_handler
 # ── 常量 ──────────────────────────────────────────────────────────
 
 APP_NAME = "BatchGo"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 REPO_URL = "https://github.com/yeshen112/BatchGo"
 
 
